@@ -3,8 +3,10 @@
 import (
 	"database/sql"
 	"fmt"
+	"log"
+	"os"
 
-	"hackernews-services/config"
+	"indexer-service/config"
 
 	_ "github.com/lib/pq"
 )
@@ -45,6 +47,11 @@ func Connect(cfg Config) error {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	// Run migrations automatically
+	if err = RunMigrations(db); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
 	return nil
 }
 
@@ -56,5 +63,20 @@ func Close() error {
 	if db != nil {
 		return db.Close()
 	}
+	return nil
+}
+
+func RunMigrations(db *sql.DB) error {
+	migrationSQL, err := os.ReadFile("pkg/database/migration/create_tables.sql")
+	if err != nil {
+		return fmt.Errorf("failed to read migration file: %w", err)
+	}
+
+	_, err = db.Exec(string(migrationSQL))
+	if err != nil {
+		return fmt.Errorf("failed to execute migrations: %w", err)
+	}
+
+	log.Println("Database migrations executed successfully")
 	return nil
 }

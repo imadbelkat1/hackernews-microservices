@@ -1,7 +1,7 @@
 package redis
 
 import (
-	"hackernews-services/config"
+	"news-service/config"
 )
 
 // RedisConfig holds the configuration for Redis

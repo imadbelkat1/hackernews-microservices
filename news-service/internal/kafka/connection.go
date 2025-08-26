@@ -1,6 +1,6 @@
 package kafka
 
-import "hackernews-services/config"
+import "news-service/config"
 
 // KafkaConfig holds the configuration for Kafka
 type KafkaConfig struct {

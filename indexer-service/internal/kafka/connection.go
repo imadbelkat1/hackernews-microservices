@@ -1,7 +1,7 @@
 package kafka
 
 import (
-	"hackernews-services/config"
+	"indexer-service/config"
 )
 
 // KafkaConfig holds the configuration for Kafka

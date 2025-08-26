@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"hackernews-services/pkg/models"
+	"indexer-service/internal/models"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -24,8 +24,6 @@ func NewObjectConsumer[T any](topic string, handler func(T) error) error {
 		MaxWait:     30 * time.Second,
 	})
 	defer reader.Close()
-
-	log.Printf("Starting REAL-TIME consumer for topic: %s", topic)
 
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -99,8 +97,6 @@ func NewObjectConsumerWithContext[T any](ctx context.Context, topic string, hand
 		MaxWait:     30 * time.Second,
 	})
 	defer reader.Close()
-
-	log.Printf("Starting REAL-TIME consumer for topic: %s", topic)
 
 	for {
 		select {

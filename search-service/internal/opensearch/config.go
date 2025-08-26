@@ -1,7 +1,7 @@
 package opensearch
 
 import (
-	"hackernews-services/config"
+	"search-service/config"
 )
 
 type OpenSearchConfig struct {

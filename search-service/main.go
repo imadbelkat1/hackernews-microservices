@@ -20,8 +20,8 @@ import (
 )
 
 func main() {
-	log.Println("🚀 Starting Search Service on port 8083...")
-	log.Println("🔍 Indexing data from Kafka → OpenSearch and providing search API...")
+	log.Println("Starting Search Service on port 8083...")
+	log.Println("Indexing data from Kafka → OpenSearch and providing search API...")
 
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
@@ -30,35 +30,35 @@ func main() {
 	// Initialize OpenSearch service
 	openSearchService, err := opensearch.NewOpenSearchService()
 	if err != nil {
-		log.Printf("⚠️ Failed to create OpenSearch service: %v", err)
+		log.Printf("Failed to create OpenSearch service: %v", err)
 		log.Println("Continuing without OpenSearch indexing...")
 		openSearchService = nil
 	} else {
-		log.Println("✅ OpenSearch service initialized")
+		log.Println("OpenSearch service initialized")
 	}
 
 	// Create and start Kafka to OpenSearch consumer service (if OpenSearch is available)
 	if openSearchService != nil {
 		consumerService, err := services.NewKafkaOpenSearchConsumerService()
 		if err != nil {
-			log.Printf("⚠️ Failed to create OpenSearch consumer service: %v", err)
+			log.Printf("Failed to create OpenSearch consumer service: %v", err)
 			log.Println("Continuing without OpenSearch indexing...")
 		} else {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				log.Println("🎧 Starting Kafka to OpenSearch consumer service...")
+				log.Println("Starting Kafka to OpenSearch consumer service...")
 				if err := consumerService.Start(ctx); err != nil {
-					log.Printf("❌ Consumer service error: %v", err)
+					log.Printf("Consumer service error: %v", err)
 				}
 			}()
 
 			// Defer stopping the consumer service
 			defer func() {
 				if err := consumerService.Stop(); err != nil {
-					log.Printf("❌ Error stopping consumer service: %v", err)
+					log.Printf("Error stopping consumer service: %v", err)
 				} else {
-					log.Println("✅ Consumer service stopped")
+					log.Println("Consumer service stopped")
 				}
 			}()
 		}
@@ -109,8 +109,8 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		log.Println("🌐 Search Service HTTP server listening on :8083")
-		log.Println("📍 Available endpoints:")
+		log.Println("Search Service HTTP server listening on :8083")
+		log.Println("Available endpoints:")
 		log.Println("   - GET /health")
 		log.Println("   - GET /api/v1/search/stories?q=query")
 		log.Println("   - GET /api/v1/search/users?q=query")
@@ -121,13 +121,13 @@ func main() {
 		log.Println("   - GET /api/v1/search/all?q=query")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("❌ HTTP server error: %v", err)
+			log.Printf("HTTP server error: %v", err)
 		}
 	}()
 
-	log.Println("✅ Search Service started successfully!")
+	log.Println("Search Service started successfully!")
 	if openSearchService != nil {
-		log.Println("🔄 Indexing data from Kafka topics:")
+		log.Println("Indexing data from Kafka topics:")
 		log.Println("   - StoriesTopic → OpenSearch")
 		log.Println("   - UsersTopic → OpenSearch")
 		log.Println("   - CommentsTopic → OpenSearch")
@@ -143,7 +143,7 @@ func main() {
 	<-quit
 
 	// Graceful shutdown
-	log.Println("🛑 Shutting down Search Service...")
+	log.Println("Shutting down Search Service...")
 	cancel() // Cancel context for consumers
 
 	// Shutdown HTTP server
@@ -151,12 +151,12 @@ func main() {
 	defer shutdownCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("❌ Error shutting down HTTP server: %v", err)
+		log.Printf("Error shutting down HTTP server: %v", err)
 	} else {
-		log.Println("✅ HTTP server stopped gracefully")
+		log.Println("HTTP server stopped gracefully")
 	}
 
 	// Wait for all goroutines to finish
 	wg.Wait()
-	log.Println("👋 Search Service stopped successfully")
+	log.Println("Search Service stopped successfully")
 }

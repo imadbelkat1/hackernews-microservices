@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"news-service/internal/models"
+	"search-service/internal/models"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -135,4 +135,3 @@ func NewObjectConsumerWithContext[T any](ctx context.Context, topic string, hand
 		}
 	}
 }
-

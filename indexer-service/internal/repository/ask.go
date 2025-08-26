@@ -3,7 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"hackernews-services/pkg/models"
+
+	"indexer-service/internal/models"
 
 	"indexer-service/pkg/database"
 

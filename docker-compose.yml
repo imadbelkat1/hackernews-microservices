@@ -226,21 +226,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_INSTALL_PLUGINS=grafana-opensearch-datasource
-    volumes:
-      - grafana_data:/var/lib/grafana
-    networks:
-      - opensearch-net
-    depends_on:
-      - opensearch-node1
-
+  
 volumes:
   opensearch-data1:
   opensearch-data2:
@@ -249,7 +235,6 @@ volumes:
   redis_data:
   zookeeper_data:
   zookeeper_logs:
-  grafana_data:
 
 networks:
   opensearch-net:

@@ -1,7 +1,7 @@
 package kafka
 
 import (
-	"news-service/internal/config"
+	"search-service/config"
 )
 
 // KafkaConfig holds the configuration for Kafka
@@ -21,4 +21,3 @@ func GetKafkaConfig() KafkaConfig {
 		Topic:            config.GetEnv("KAFKA_TOPICS", "StoriesTopic,CommentsTopic,AsksTopic,JobsTopic,PollsTopic,PollOptionsTopic,UsersTopic"),
 	}
 }
-

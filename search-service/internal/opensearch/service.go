@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hackernews-services/pkg/models"
+	"search-service/internal/models"
 
 	"github.com/opensearch-project/opensearch-go/v2"
 	"github.com/opensearch-project/opensearch-go/v2/opensearchapi"
@@ -87,7 +87,7 @@ func (s *OpenSearchService) indexDocument(indexName, docID string, document inte
 		Index:      fullIndexName,
 		DocumentID: docID,
 		Body:       strings.NewReader(string(docJSON)),
-		Refresh:    "true", // Make the document immediately searchable
+		Refresh:    "wait_for",
 	}
 
 	res, err := req.Do(context.Background(), s.client)
@@ -192,60 +192,104 @@ func (s *OpenSearchService) getDefaultMapping(docType string) map[string]interfa
 	baseMapping := map[string]interface{}{
 		"properties": map[string]interface{}{
 			"id": map[string]interface{}{
-				"type": "integer",
+				"type": "long",
 			},
 			"type": map[string]interface{}{
 				"type": "keyword",
 			},
-			"created_at": map[string]interface{}{
+			"time": map[string]interface{}{
 				"type":   "date",
 				"format": "epoch_second",
 			},
-			"author": map[string]interface{}{
-				"type": "keyword",
+			"by": map[string]interface{}{
+				"type": "text",
+				"fields": map[string]interface{}{
+					"keyword": map[string]interface{}{
+						"type":         "keyword",
+						"ignore_above": 256,
+					},
+				},
 			},
 		},
 	}
 
-	// Add type-specific mappings
 	properties := baseMapping["properties"].(map[string]interface{})
 
 	switch docType {
 	case "stories":
-		properties["title"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
+		properties["title"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
 		properties["url"] = map[string]interface{}{"type": "keyword"}
 		properties["score"] = map[string]interface{}{"type": "integer"}
-		properties["comments_count"] = map[string]interface{}{"type": "integer"}
-		properties["comments_ids"] = map[string]interface{}{"type": "integer"}
+		properties["descendants"] = map[string]interface{}{"type": "integer"}
+		properties["kids"] = map[string]interface{}{"type": "long"}
 
 	case "asks":
-		properties["title"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
-		properties["text"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
+		properties["title"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
+		properties["text"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
 		properties["score"] = map[string]interface{}{"type": "integer"}
-		properties["replies_count"] = map[string]interface{}{"type": "integer"}
+		properties["descendants"] = map[string]interface{}{"type": "integer"}
+		properties["kids"] = map[string]interface{}{"type": "long"}
 
 	case "comments":
-		properties["text"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
-		properties["parent_id"] = map[string]interface{}{"type": "integer"}
+		properties["text"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
+		properties["parent"] = map[string]interface{}{"type": "long"}
+		properties["kids"] = map[string]interface{}{"type": "long"}
 
 	case "jobs":
-		properties["title"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
-		properties["text"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
+		properties["title"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
+		properties["text"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
 		properties["url"] = map[string]interface{}{"type": "keyword"}
-
-	case "polls":
-		properties["title"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
 		properties["score"] = map[string]interface{}{"type": "integer"}
 
+	case "polls":
+		properties["title"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
+		properties["score"] = map[string]interface{}{"type": "integer"}
+		properties["parts"] = map[string]interface{}{"type": "long"}
+		properties["kids"] = map[string]interface{}{"type": "long"}
+
 	case "polloptions":
-		properties["option_text"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
-		properties["poll_id"] = map[string]interface{}{"type": "integer"}
-		properties["votes"] = map[string]interface{}{"type": "integer"}
+		properties["text"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
+		properties["poll"] = map[string]interface{}{"type": "long"}
+		properties["score"] = map[string]interface{}{"type": "integer"}
 
 	case "users":
-		properties["username"] = map[string]interface{}{"type": "keyword"}
+		properties["id"] = map[string]interface{}{
+			"type": "keyword",
+		}
 		properties["karma"] = map[string]interface{}{"type": "integer"}
-		properties["about"] = map[string]interface{}{"type": "text", "analyzer": "standard"}
+		properties["about"] = map[string]interface{}{
+			"type":     "text",
+			"analyzer": "standard",
+		}
+		properties["created"] = map[string]interface{}{
+			"type":   "date",
+			"format": "epoch_second",
+		}
+		properties["submitted"] = map[string]interface{}{"type": "long"}
 	}
 
 	return baseMapping

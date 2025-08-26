@@ -3,22 +3,21 @@ package services
 import (
 	"context"
 	"log"
-	"news-service/internal/kafka"
-	"news-service/internal/opensearch"
 	"sync"
+	"time"
 
-	"hackernews-services/pkg/models"
+	"search-service/internal/kafka"
+	"search-service/internal/models"
+	"search-service/internal/opensearch"
 )
 
-// KafkaOpenSearchConsumerService handles consuming from Kafka and indexing to OpenSearch
 type KafkaOpenSearchConsumerService struct {
 	openSearchService *opensearch.OpenSearchService
-	running           bool
-	stopCh            chan struct{}
+	ctx               context.Context
+	cancel            context.CancelFunc
 	wg                sync.WaitGroup
 }
 
-// NewKafkaOpenSearchConsumerService creates a new consumer service
 func NewKafkaOpenSearchConsumerService() (*KafkaOpenSearchConsumerService, error) {
 	osService, err := opensearch.NewOpenSearchService()
 	if err != nil {
@@ -27,200 +26,397 @@ func NewKafkaOpenSearchConsumerService() (*KafkaOpenSearchConsumerService, error
 
 	return &KafkaOpenSearchConsumerService{
 		openSearchService: osService,
-		stopCh:            make(chan struct{}),
 	}, nil
 }
 
-// Start begins consuming from all Kafka topics
 func (s *KafkaOpenSearchConsumerService) Start(ctx context.Context) error {
-	if s.running {
-		return nil
-	}
+	s.ctx, s.cancel = context.WithCancel(ctx)
+	log.Println("Starting simple batch consumers...")
 
-	s.running = true
-	log.Println("Starting Kafka to OpenSearch consumer service...")
-
-	// Start consumers for each topic
-	topics := []struct {
-		name    string
-		handler func() error
-	}{
-		{"StoriesTopic", s.consumeStories},
-		{"AsksTopic", s.consumeAsks},
-		{"CommentsTopic", s.consumeComments},
-		{"JobsTopic", s.consumeJobs},
-		{"PollsTopic", s.consumePolls},
-		{"PollOptionsTopic", s.consumePollOptions},
-		{"UsersTopic", s.consumeUsers},
+	topics := []string{
+		"StoriesTopic",
+		"AsksTopic",
+		"CommentsTopic",
+		"JobsTopic",
+		"PollsTopic",
+		"PollOptionsTopic",
+		"UsersTopic",
 	}
 
 	for _, topic := range topics {
 		s.wg.Add(1)
-		go func(name string, handler func() error) {
-			defer s.wg.Done()
-			log.Printf("Starting consumer for topic: %s", name)
-			if err := handler(); err != nil {
-				log.Printf("Error in consumer for topic %s: %v", name, err)
-			}
-		}(topic.name, topic.handler)
+		go s.consumeTopic(topic)
 	}
 
-	log.Println("All Kafka consumers started successfully")
 	return nil
 }
 
-// Stop gracefully stops all consumers
 func (s *KafkaOpenSearchConsumerService) Stop() error {
-	if !s.running {
-		return nil
+	log.Println("Stopping consumers...")
+	if s.cancel != nil {
+		s.cancel()
 	}
-
-	log.Println("Stopping Kafka to OpenSearch consumer service...")
-	s.running = false
-	close(s.stopCh)
 	s.wg.Wait()
-	log.Println("All consumers stopped successfully")
+	log.Println("All consumers stopped")
 	return nil
 }
 
-// Topic-specific consumer functions
+func (s *KafkaOpenSearchConsumerService) consumeTopic(topic string) {
+	defer s.wg.Done()
 
-func (s *KafkaOpenSearchConsumerService) consumeStories() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	batch := make([]interface{}, 0, 50)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
 
-	// Listen for stop signal
+	messageCh := make(chan interface{}, 100)
+
+	// Start Kafka consumer
 	go func() {
-		<-s.stopCh
-		cancel()
+		kafka.NewObjectConsumerWithContext(s.ctx, topic, func(msg interface{}) error {
+			select {
+			case messageCh <- msg:
+				return nil
+			case <-s.ctx.Done():
+				return s.ctx.Err()
+			}
+		})
 	}()
 
-	return kafka.NewObjectConsumerWithContext(ctx, "StoriesTopic", func(story *models.Story) error {
-		if err := s.openSearchService.IndexStory(story); err != nil {
-			log.Printf("Error indexing story %d: %v", story.ID, err)
-			return err
+	// Simple batch loop
+	for {
+		select {
+		case msg := <-messageCh:
+			batch = append(batch, msg)
+			if len(batch) >= 50 {
+				s.indexBatch(topic, batch)
+				batch = batch[:0]
+			}
+
+		case <-ticker.C:
+			if len(batch) > 0 {
+				s.indexBatch(topic, batch)
+				batch = batch[:0]
+			}
+
+		case <-s.ctx.Done():
+			if len(batch) > 0 {
+				s.indexBatch(topic, batch)
+			}
+			return
 		}
-		log.Printf("Successfully indexed story: %d - %s", story.ID, story.Title)
-		return nil
-	})
+	}
 }
 
-func (s *KafkaOpenSearchConsumerService) consumeAsks() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (s *KafkaOpenSearchConsumerService) indexBatch(topic string, batch []interface{}) {
+	if len(batch) == 0 {
+		return
+	}
 
-	// Listen for stop signal
-	go func() {
-		<-s.stopCh
-		cancel()
-	}()
-
-	return kafka.NewObjectConsumerWithContext(ctx, "AsksTopic", func(ask *models.Ask) error {
-		if err := s.openSearchService.IndexAsk(ask); err != nil {
-			log.Printf("Error indexing ask %d: %v", ask.ID, err)
-			return err
+	var err error
+	switch topic {
+	case "StoriesTopic":
+		stories, convertErr := s.convertToStories(batch)
+		if convertErr != nil {
+			log.Printf("Failed to convert stories batch: %v", convertErr)
+			return
 		}
-		log.Printf("Successfully indexed ask: %d - %s", ask.ID, ask.Title)
-		return nil
-	})
+		err = s.openSearchService.BulkIndexStories(stories)
+
+	case "AsksTopic":
+		asks, convertErr := s.convertToAsks(batch)
+		if convertErr != nil {
+			log.Printf("Failed to convert asks batch: %v", convertErr)
+			return
+		}
+		err = s.openSearchService.BulkIndexAsks(asks)
+
+	case "CommentsTopic":
+		comments, convertErr := s.convertToComments(batch)
+		if convertErr != nil {
+			log.Printf("Failed to convert comments batch: %v", convertErr)
+			return
+		}
+		err = s.openSearchService.BulkIndexComments(comments)
+
+	case "JobsTopic":
+		jobs, convertErr := s.convertToJobs(batch)
+		if convertErr != nil {
+			log.Printf("Failed to convert jobs batch: %v", convertErr)
+			return
+		}
+		err = s.openSearchService.BulkIndexJobs(jobs)
+
+	case "PollsTopic":
+		polls, convertErr := s.convertToPolls(batch)
+		if convertErr != nil {
+			log.Printf("Failed to convert polls batch: %v", convertErr)
+			return
+		}
+		err = s.openSearchService.BulkIndexPolls(polls)
+
+	case "PollOptionsTopic":
+		pollOptions, convertErr := s.convertToPollOptions(batch)
+		if convertErr != nil {
+			log.Printf("Failed to convert poll options batch: %v", convertErr)
+			return
+		}
+		err = s.openSearchService.BulkIndexPollOptions(pollOptions)
+
+	case "UsersTopic":
+		users, convertErr := s.convertToUsers(batch)
+		if convertErr != nil {
+			log.Printf("Failed to convert users batch: %v", convertErr)
+			return
+		}
+		err = s.openSearchService.BulkIndexUsers(users)
+	}
+
+	if err != nil {
+		log.Printf("Batch index failed for %s: %v", topic, err)
+	} else {
+		log.Printf("Indexed %d items from %s", len(batch), topic)
+	}
 }
 
-func (s *KafkaOpenSearchConsumerService) consumeComments() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Listen for stop signal
-	go func() {
-		<-s.stopCh
-		cancel()
-	}()
-
-	return kafka.NewObjectConsumerWithContext(ctx, "CommentsTopic", func(comment *models.Comment) error {
-		if err := s.openSearchService.IndexComment(comment); err != nil {
-			log.Printf("Error indexing comment %d: %v", comment.ID, err)
-			return err
+// Helper functions to convert map[string]interface{} to typed structs
+func (s *KafkaOpenSearchConsumerService) convertToStories(batch []interface{}) ([]*models.Story, error) {
+	stories := make([]*models.Story, 0, len(batch))
+	for _, item := range batch {
+		data, ok := item.(map[string]interface{})
+		if !ok {
+			continue // Skip invalid items
 		}
-		log.Printf("Successfully indexed comment: %d by %s", comment.ID, comment.Author)
-		return nil
-	})
+
+		story := &models.Story{}
+		if id, ok := data["id"].(float64); ok {
+			story.ID = int(id)
+		}
+		if title, ok := data["title"].(string); ok {
+			story.Title = title
+		}
+		if url, ok := data["url"].(string); ok {
+			story.URL = url
+		}
+		if score, ok := data["score"].(float64); ok {
+			story.Score = int(score)
+		}
+		if author, ok := data["by"].(string); ok {
+			story.Author = author
+		}
+		if time, ok := data["time"].(float64); ok {
+			story.Created_At = int64(time)
+		}
+		if descendants, ok := data["descendants"].(float64); ok {
+			story.Comments_count = int(descendants)
+		}
+		story.Type = "story"
+
+		if story.IsValid() {
+			stories = append(stories, story)
+		}
+	}
+	return stories, nil
 }
 
-func (s *KafkaOpenSearchConsumerService) consumeJobs() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Listen for stop signal
-	go func() {
-		<-s.stopCh
-		cancel()
-	}()
-
-	return kafka.NewObjectConsumerWithContext(ctx, "JobsTopic", func(job *models.Job) error {
-		if err := s.openSearchService.IndexJob(job); err != nil {
-			log.Printf("Error indexing job %d: %v", job.ID, err)
-			return err
+func (s *KafkaOpenSearchConsumerService) convertToUsers(batch []interface{}) ([]*models.User, error) {
+	users := make([]*models.User, 0, len(batch))
+	for _, item := range batch {
+		data, ok := item.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		log.Printf("Successfully indexed job: %d - %s", job.ID, job.Title)
-		return nil
-	})
+
+		user := &models.User{}
+		if username, ok := data["id"].(string); ok {
+			user.Username = username
+		}
+		if karma, ok := data["karma"].(float64); ok {
+			user.Karma = int(karma)
+		}
+		if about, ok := data["about"].(string); ok {
+			user.About = about
+		}
+		if created, ok := data["created"].(float64); ok {
+			user.Created_At = int64(created)
+		}
+
+		if user.Username != "" {
+			users = append(users, user)
+		}
+	}
+	return users, nil
 }
 
-func (s *KafkaOpenSearchConsumerService) consumePolls() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Listen for stop signal
-	go func() {
-		<-s.stopCh
-		cancel()
-	}()
-
-	return kafka.NewObjectConsumerWithContext(ctx, "PollsTopic", func(poll *models.Poll) error {
-		if err := s.openSearchService.IndexPoll(poll); err != nil {
-			log.Printf("Error indexing poll %d: %v", poll.ID, err)
-			return err
+func (s *KafkaOpenSearchConsumerService) convertToAsks(batch []interface{}) ([]*models.Ask, error) {
+	asks := make([]*models.Ask, 0, len(batch))
+	for _, item := range batch {
+		data, ok := item.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		log.Printf("Successfully indexed poll: %d - %s", poll.ID, poll.Title)
-		return nil
-	})
+
+		ask := &models.Ask{}
+		if id, ok := data["id"].(float64); ok {
+			ask.ID = int(id)
+		}
+		if title, ok := data["title"].(string); ok {
+			ask.Title = title
+		}
+		if text, ok := data["text"].(string); ok {
+			ask.Text = text
+		}
+		if score, ok := data["score"].(float64); ok {
+			ask.Score = int(score)
+		}
+		if author, ok := data["by"].(string); ok {
+			ask.Author = author
+		}
+		if time, ok := data["time"].(float64); ok {
+			ask.Created_At = int64(time)
+		}
+		ask.Type = "ask"
+
+		if ask.IsValid() {
+			asks = append(asks, ask)
+		}
+	}
+	return asks, nil
 }
 
-func (s *KafkaOpenSearchConsumerService) consumePollOptions() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Listen for stop signal
-	go func() {
-		<-s.stopCh
-		cancel()
-	}()
-
-	return kafka.NewObjectConsumerWithContext(ctx, "PollOptionsTopic", func(pollOption *models.PollOption) error {
-		if err := s.openSearchService.IndexPollOption(pollOption); err != nil {
-			log.Printf("Error indexing poll option %d: %v", pollOption.ID, err)
-			return err
+func (s *KafkaOpenSearchConsumerService) convertToComments(batch []interface{}) ([]*models.Comment, error) {
+	comments := make([]*models.Comment, 0, len(batch))
+	for _, item := range batch {
+		data, ok := item.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		log.Printf("Successfully indexed poll option: %d - %s", pollOption.ID, pollOption.OptionText)
-		return nil
-	})
+
+		comment := &models.Comment{}
+		if id, ok := data["id"].(float64); ok {
+			comment.ID = int(id)
+		}
+		if text, ok := data["text"].(string); ok {
+			comment.Text = text
+		}
+		if author, ok := data["by"].(string); ok {
+			comment.Author = author
+		}
+		if parent, ok := data["parent"].(float64); ok {
+			comment.Parent = int(parent)
+		}
+		if time, ok := data["time"].(float64); ok {
+			comment.Created_At = int64(time)
+		}
+		comment.Type = "comment"
+
+		if comment.IsValid() {
+			comments = append(comments, comment)
+		}
+	}
+	return comments, nil
 }
 
-func (s *KafkaOpenSearchConsumerService) consumeUsers() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Listen for stop signal
-	go func() {
-		<-s.stopCh
-		cancel()
-	}()
-
-	return kafka.NewObjectConsumerWithContext(ctx, "UsersTopic", func(user *models.User) error {
-		if err := s.openSearchService.IndexUser(user); err != nil {
-			log.Printf("Error indexing user %s: %v", user.Username, err)
-			return err
+func (s *KafkaOpenSearchConsumerService) convertToJobs(batch []interface{}) ([]*models.Job, error) {
+	jobs := make([]*models.Job, 0, len(batch))
+	for _, item := range batch {
+		data, ok := item.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		log.Printf("Successfully indexed user: %s (karma: %d)", user.Username, user.Karma)
-		return nil
-	})
+
+		job := &models.Job{}
+		if id, ok := data["id"].(float64); ok {
+			job.ID = int(id)
+		}
+		if title, ok := data["title"].(string); ok {
+			job.Title = title
+		}
+		if text, ok := data["text"].(string); ok {
+			job.Text = text
+		}
+		if url, ok := data["url"].(string); ok {
+			job.URL = url
+		}
+		if author, ok := data["by"].(string); ok {
+			job.Author = author
+		}
+		if time, ok := data["time"].(float64); ok {
+			job.Created_At = int64(time)
+		}
+		job.Type = "job"
+
+		if job.IsValid() {
+			jobs = append(jobs, job)
+		}
+	}
+	return jobs, nil
+}
+
+func (s *KafkaOpenSearchConsumerService) convertToPolls(batch []interface{}) ([]*models.Poll, error) {
+	polls := make([]*models.Poll, 0, len(batch))
+	for _, item := range batch {
+		data, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		poll := &models.Poll{}
+		if id, ok := data["id"].(float64); ok {
+			poll.ID = int(id)
+		}
+		if title, ok := data["title"].(string); ok {
+			poll.Title = title
+		}
+		if score, ok := data["score"].(float64); ok {
+			poll.Score = int(score)
+		}
+		if author, ok := data["by"].(string); ok {
+			poll.Author = author
+		}
+		if time, ok := data["time"].(float64); ok {
+			poll.Created_At = int64(time)
+		}
+		poll.Type = "poll"
+
+		if poll.IsValid() {
+			polls = append(polls, poll)
+		}
+	}
+	return polls, nil
+}
+
+func (s *KafkaOpenSearchConsumerService) convertToPollOptions(batch []interface{}) ([]*models.PollOption, error) {
+	pollOptions := make([]*models.PollOption, 0, len(batch))
+	for _, item := range batch {
+		data, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		pollOption := &models.PollOption{}
+		if id, ok := data["id"].(float64); ok {
+			pollOption.ID = int(id)
+		}
+		if text, ok := data["text"].(string); ok {
+			pollOption.OptionText = text
+		}
+		if poll, ok := data["poll"].(float64); ok {
+			pollOption.PollID = int(poll)
+		}
+		if author, ok := data["by"].(string); ok {
+			pollOption.Author = author
+		}
+		if time, ok := data["time"].(float64); ok {
+			pollOption.CreatedAt = int64(time)
+		}
+		if score, ok := data["score"].(float64); ok {
+			pollOption.Votes = int(score)
+		}
+		pollOption.Type = "pollOption"
+
+		if pollOption.IsValid() {
+			pollOptions = append(pollOptions, pollOption)
+		}
+	}
+	return pollOptions, nil
 }

@@ -11,11 +11,10 @@ type Story struct {
 	Score          int    `json:"score" db:"score"`
 	Author         string `json:"by" db:"author"`
 	Created_At     int64  `json:"time" db:"created_at"`
-	Comments_ids   []int  `json:"kids," db:"comments_ids"` // IDs of comments associated with the story
+	Comments_ids   []int  `json:"kids" db:"comments_ids"` // IDs of comments associated with the story
 	Comments_count int    `json:"descendants" db:"comments_count"`
 }
 
 func (s *Story) IsValid() bool {
 	return s.ID > 0 && s.Type == "story" && s.Title != "" && s.Author != "" && s.Created_At > 0
 }
-

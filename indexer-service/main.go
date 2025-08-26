@@ -16,8 +16,8 @@ import (
 )
 
 func main() {
-	log.Println("----------Starting Indexer Service on port 8082...")
-	log.Println("----------Processing data from Kafka → PostgreSQL...")
+	log.Println("Starting Indexer Service on port 8082...")
+	log.Println("Processing data from Kafka to PostgreSQL...")
 
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
@@ -57,7 +57,7 @@ func main() {
 			topic: "StoriesTopic",
 			handler: func() error {
 				return kafka.NewStoryConsumer("StoriesTopic", func(story *models.Story) error {
-					log.Printf("📰 Processing story: ID=%d, Title=%s", story.ID, story.Title)
+					log.Printf("Processing story: ID=%d, Title=%s", story.ID, story.Title)
 
 					exists, err := storyRepo.Exists(ctx, story.ID)
 					if err != nil {
@@ -76,7 +76,7 @@ func main() {
 			topic: "UsersTopic",
 			handler: func() error {
 				return kafka.NewUserConsumer("UsersTopic", func(user *models.User) error {
-					log.Printf("👤 Processing user: Username=%s, Karma=%d", user.Username, user.Karma)
+					log.Printf("Processing user: Username=%s, Karma=%d", user.Username, user.Karma)
 
 					exists, err := userRepo.UserExists(ctx, user.Username)
 					if err != nil {
@@ -95,7 +95,7 @@ func main() {
 			topic: "CommentsTopic",
 			handler: func() error {
 				return kafka.NewCommentConsumer("CommentsTopic", func(comment *models.Comment) error {
-					log.Printf("💬 Processing comment: ID=%d, Author=%s", comment.ID, comment.Author)
+					log.Printf("Processing comment: ID=%d, Author=%s", comment.ID, comment.Author)
 
 					exists, err := commentRepo.Exists(ctx, comment.ID)
 					if err != nil {
@@ -114,7 +114,7 @@ func main() {
 			topic: "JobsTopic",
 			handler: func() error {
 				return kafka.NewJobConsumer("JobsTopic", func(job *models.Job) error {
-					log.Printf("💼 Processing job: ID=%d, Title=%s", job.ID, job.Title)
+					log.Printf("Processing job: ID=%d, Title=%s", job.ID, job.Title)
 
 					exists, err := jobRepo.Exists(ctx, job.ID)
 					if err != nil {
@@ -133,7 +133,7 @@ func main() {
 			topic: "AsksTopic",
 			handler: func() error {
 				return kafka.NewAskConsumer("AsksTopic", func(ask *models.Ask) error {
-					log.Printf("❓ Processing ask: ID=%d, Title=%s", ask.ID, ask.Title)
+					log.Printf("Processing ask: ID=%d, Title=%s", ask.ID, ask.Title)
 
 					exists, err := askRepo.Exists(ctx, ask.ID)
 					if err != nil {
@@ -152,7 +152,7 @@ func main() {
 			topic: "PollsTopic",
 			handler: func() error {
 				return kafka.NewPollConsumer("PollsTopic", func(poll *models.Poll) error {
-					log.Printf("📊 Processing poll: ID=%d, Title=%s", poll.ID, poll.Title)
+					log.Printf("Processing poll: ID=%d, Title=%s", poll.ID, poll.Title)
 
 					exists, err := pollRepo.Exists(ctx, poll.ID)
 					if err != nil {
