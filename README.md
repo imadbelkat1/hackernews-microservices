@@ -6,9 +6,9 @@ A distributed microservices implementation of a Hacker News clone built with Go,
 
 This project implements a microservices architecture with three core services:
 
-- **News Service** (Port 8081): Fetches data from Hacker News API and publishes to Kafka
-- **Indexer Service** (Port 8082): Consumes Kafka messages and stores data in PostgreSQL
-- **Search Service** (Port 8083): Consumes Kafka messages, indexes to OpenSearch, and provides search API
+- **News Service**: Fetches data from Hacker News API and publishes to Kafka
+- **Indexer Service**: Consumes Kafka messages and stores data in PostgreSQL
+- **Search Service**: Consumes Kafka messages, indexes to OpenSearch, and provides search API
 
 ## System Architecture
 
@@ -28,7 +28,7 @@ Hacker News API → News Service → Kafka → Indexer Service → PostgreSQL
 
 ## Services
 
-### News Service (Port 8081)
+### News Service
 - Fetches stories, comments, jobs, asks, polls, and users from Hacker News API
 - Implements cron jobs for periodic synchronization
 - Caches data in Redis to avoid redundant API calls
@@ -41,7 +41,7 @@ Hacker News API → News Service → Kafka → Indexer Service → PostgreSQL
 - Real-time updates sync every 10 seconds
 - Redis caching for performance optimization
 
-### Indexer Service (Port 8082)
+### Indexer Service
 - Consumes data from Kafka topics
 - Stores structured data in PostgreSQL
 - Handles database migrations automatically
