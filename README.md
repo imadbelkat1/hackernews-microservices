@@ -276,9 +276,6 @@ docker-compose logs -f opensearch-node1
 4. Add tests if applicable
 5. Submit a pull request
 
-## License
-
-[Insert your license information here]
 
 ## Acknowledgments
 
